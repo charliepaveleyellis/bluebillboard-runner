@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Blue Billboard - Billboard Run</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+    background: #001a33;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* Overlays */
+  .overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    background: rgba(0, 20, 50, 0.92);
+    color: #fff; text-align: center;
+    padding: 30px;
+  }
+  .overlay.hidden { display: none; }
+
+  .overlay .logo-img { width: 180px; margin-bottom: 24px; }
+
+  .overlay h1 {
+    font-size: 30px; text-transform: uppercase;
+    letter-spacing: 3px; margin-bottom: 8px;
+    color: #2ea3f2;
+  }
+  .overlay h2 {
+    font-size: 18px; font-weight: 400;
+    margin-bottom: 30px; color: #d9d9d9;
+    line-height: 1.5;
+  }
+  .overlay .final-score {
+    font-size: 72px; font-weight: 900;
+    color: #297ff0; margin: 10px 0;
+  }
+  .overlay .final-label {
+    font-size: 16px; color: #d9d9d9;
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+  .overlay .high-score {
+    font-size: 14px; color: #2ea3f2;
+    margin-top: 6px; letter-spacing: 1px;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 16px 48px;
+    font-size: 18px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: #fff;
+    background: #003d7a;
+    border: none; border-radius: 50px;
+    cursor: pointer;
+    margin-top: 30px;
+    transition: background 0.2s;
+  }
+  .btn:active { background: #297ff0; }
+
+  .powered-by {
+    position: fixed; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: rgba(255,255,255,0.3);
+    letter-spacing: 1px; text-transform: uppercase;
+    z-index: 3;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- Start screen -->
+<div class="overlay" id="startScreen">
+  <img src="logo.png" alt="Blue Billboard" class="logo-img">
+  <h1>Billboard Run</h1>
+  <h2>Tap or press Space to jump!<br>Avoid the obstacles. How far can you go?</h2>
+  <button class="btn" id="startBtn">Run!</button>
+</div>
+
+<!-- End screen -->
+<div class="overlay hidden" id="endScreen">
+  <img src="logo.png" alt="Blue Billboard" class="logo-img">
+  <h1>Game Over!</h1>
+  <div class="final-label">Distance</div>
+  <div class="final-score" id="finalScore">0</div>
+  <div class="high-score" id="highScoreDisplay"></div>
+  <button class="btn" id="restartBtn">Run Again!</button>
+</div>
+
+<div class="powered-by">Powered by Blue Billboard</div>
+
+<script>
+// ─── CANVAS SETUP ─────────────────────────────────
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── BRAND COLOURS ────────────────────────────────
+var NAVY    = '#003d7a';
+var BLUE    = '#297ff0';
+var LIGHT   = '#2ea3f2';
+var RED     = '#ff5a4d';
+var GOLD    = '#ffc107';
+var WHITE   = '#ffffff';
+var DARK    = '#001a33';
+
+// ─── GAME CONFIG ──────────────────────────────────
+var GRAVITY       = 0.6;
+var JUMP_FORCE    = -13;
+var GROUND_OFFSET = 80;   // pixels from bottom
+var BASE_SPEED    = 5;
+var MAX_SPEED     = 14;
+var SPEED_RAMP    = 0.003; // speed increase per frame
+
+// ─── STATE ────────────────────────────────────────
+var running = false;
+var gameOver = false;
+var score = 0;
+var highScore = parseInt(localStorage.getItem('bb_runner_high') || '0');
+var speed = BASE_SPEED;
+var frameCount = 0;
+
+// Player
+var player = { x: 0, y: 0, w: 40, h: 50, vy: 0, onGround: true, ducking: false };
+
+// Obstacles
+var obstacles = [];
+var minSpawnDist = 300;
+var lastObstacleX = 0;
+
+// Clouds (background)
+var clouds = [];
+
+// Ground particles
+var particles = [];
+
+// Stars (background)
+var stars = [];
+for (var i = 0; i < 60; i++) {
+  stars.push({
+    x: Math.random() * 2000,
+    y: Math.random() * (window.innerHeight * 0.6),
+    size: Math.random() * 2 + 0.5,
+    twinkle: Math.random() * Math.PI * 2
+  });
+}
+
+// ─── ELEMENTS ─────────────────────────────────────
+var startScreen = document.getElementById('startScreen');
+var endScreen   = document.getElementById('endScreen');
+var finalScoreEl = document.getElementById('finalScore');
+var highScoreEl  = document.getElementById('highScoreDisplay');
+
+// ─── GROUND Y ─────────────────────────────────────
+function groundY() {
+  return canvas.height - GROUND_OFFSET;
+}
+
+// ─── RESET ────────────────────────────────────────
+function resetGame() {
+  score = 0;
+  speed = BASE_SPEED;
+  frameCount = 0;
+  obstacles = [];
+  clouds = [];
+  particles = [];
+  lastObstacleX = canvas.width + 200;
+
+  player.x = 80;
+  player.y = groundY() - player.h;
+  player.vy = 0;
+  player.onGround = true;
+  player.ducking = false;
+
+  // Initial clouds
+  for (var i = 0; i < 5; i++) {
+    clouds.push({
+      x: Math.random() * canvas.width,
+      y: 60 + Math.random() * (canvas.height * 0.3),
+      w: 60 + Math.random() * 80,
+      speed: 0.3 + Math.random() * 0.5
+    });
+  }
+}
+
+// ─── JUMP ─────────────────────────────────────────
+function jump() {
+  if (player.onGround) {
+    player.vy = JUMP_FORCE;
+    player.onGround = false;
+    // Jump particles
+    for (var i = 0; i < 6; i++) {
+      particles.push({
+        x: player.x + player.w / 2,
+        y: groundY(),
+        vx: (Math.random() - 0.5) * 4,
+        vy: -Math.random() * 3 - 1,
+        life: 20 + Math.random() * 10,
+        size: 2 + Math.random() * 3,
+        color: LIGHT
+      });
+    }
+  }
+}
+
+// ─── INPUT ────────────────────────────────────────
+function handleInput(e) {
+  if (e) e.preventDefault();
+  if (!running) return;
+  if (gameOver) return;
+  jump();
+}
+
+document.addEventListener('touchstart', handleInput, { passive: false });
+document.addEventListener('mousedown', handleInput);
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    handleInput(e);
+  }
+});
+
+// ─── SPAWN OBSTACLE ───────────────────────────────
+function spawnObstacle() {
+  var gy = groundY();
+  var type = Math.random();
+
+  if (type < 0.35) {
+    // Small billboard sign
+    var h = 35 + Math.random() * 20;
+    obstacles.push({
+      x: canvas.width + 20,
+      y: gy - h,
+      w: 25,
+      h: h,
+      type: 'sign',
+      color: RED,
+      passed: false
+    });
+  } else if (type < 0.65) {
+    // Tall billboard
+    var h = 55 + Math.random() * 25;
+    obstacles.push({
+      x: canvas.width + 20,
+      y: gy - h,
+      w: 40,
+      h: h,
+      type: 'tall',
+      color: RED,
+      passed: false
+    });
+  } else if (type < 0.85) {
+    // Double obstacle
+    var h1 = 30 + Math.random() * 15;
+    var h2 = 35 + Math.random() * 20;
+    obstacles.push({
+      x: canvas.width + 20,
+      y: gy - h1,
+      w: 22,
+      h: h1,
+      type: 'sign',
+      color: RED,
+      passed: false
+    });
+    obstacles.push({
+      x: canvas.width + 65,
+      y: gy - h2,
+      w: 22,
+      h: h2,
+      type: 'sign',
+      color: RED,
+      passed: false
+    });
+    lastObstacleX = canvas.width + 65;
+    return;
+  } else {
+    // Wide barrier
+    obstacles.push({
+      x: canvas.width + 20,
+      y: gy - 30,
+      w: 60 + Math.random() * 30,
+      h: 30,
+      type: 'barrier',
+      color: '#ff5a4d',
+      passed: false
+    });
+  }
+
+  lastObstacleX = canvas.width + 20;
+}
+
+// ─── DRAW FUNCTIONS ───────────────────────────────
+
+function drawSky() {
+  // Gradient sky
+  var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#000d1a');
+  grad.addColorStop(0.5, '#001a33');
+  grad.addColorStop(1, '#003d7a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Stars
+  for (var i = 0; i < stars.length; i++) {
+    var s = stars[i];
+    s.twinkle += 0.03;
+    var alpha = 0.3 + Math.sin(s.twinkle) * 0.3;
+    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
+    ctx.beginPath();
+    ctx.arc(s.x % canvas.width, s.y, s.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawClouds() {
+  for (var i = clouds.length - 1; i >= 0; i--) {
+    var c = clouds[i];
+    c.x -= c.speed;
+    if (c.x + c.w < 0) {
+      c.x = canvas.width + 50;
+      c.y = 60 + Math.random() * (canvas.height * 0.3);
+    }
+    ctx.fillStyle = 'rgba(42, 163, 242, 0.08)';
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, c.w / 2, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x - c.w * 0.2, c.y + 5, c.w * 0.3, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x + c.w * 0.25, c.y + 3, c.w * 0.25, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawGround() {
+  var gy = groundY();
+
+  // Ground line
+  ctx.strokeStyle = LIGHT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, gy);
+  ctx.lineTo(canvas.width, gy);
+  ctx.stroke();
+
+  // Ground texture dashes
+  ctx.strokeStyle = 'rgba(42, 163, 242, 0.2)';
+  ctx.lineWidth = 1;
+  var dashOffset = (frameCount * speed) % 40;
+  for (var x = -dashOffset; x < canvas.width; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, gy + 15);
+    ctx.lineTo(x + 15, gy + 15);
+    ctx.stroke();
+  }
+  var dashOffset2 = (frameCount * speed * 0.6) % 60;
+  for (var x = -dashOffset2; x < canvas.width; x += 60) {
+    ctx.beginPath();
+    ctx.moveTo(x, gy + 30);
+    ctx.lineTo(x + 10, gy + 30);
+    ctx.stroke();
+  }
+}
+
+function drawPlayer() {
+  var p = player;
+  ctx.save();
+
+  // Shadow on ground
+  var shadowScale = 1 - (groundY() - (p.y + p.h)) / 200;
+  if (shadowScale > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.ellipse(p.x + p.w / 2, groundY() + 2, p.w * 0.5 * shadowScale, 4 * shadowScale, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Body (billboard-shaped character)
+  var r = 6;
+  ctx.beginPath();
+  ctx.moveTo(p.x + r, p.y);
+  ctx.lineTo(p.x + p.w - r, p.y);
+  ctx.quadraticCurveTo(p.x + p.w, p.y, p.x + p.w, p.y + r);
+  ctx.lineTo(p.x + p.w, p.y + p.h - r);
+  ctx.quadraticCurveTo(p.x + p.w, p.y + p.h, p.x + p.w - r, p.y + p.h);
+  ctx.lineTo(p.x + r, p.y + p.h);
+  ctx.quadraticCurveTo(p.x, p.y + p.h, p.x, p.y + p.h - r);
+  ctx.lineTo(p.x, p.y + r);
+  ctx.quadraticCurveTo(p.x, p.y, p.x + r, p.y);
+  ctx.closePath();
+
+  // Fill with gradient
+  var bodyGrad = ctx.createLinearGradient(p.x, p.y, p.x + p.w, p.y + p.h);
+  bodyGrad.addColorStop(0, BLUE);
+  bodyGrad.addColorStop(1, NAVY);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+
+  // Shine
+  var shineGrad = ctx.createLinearGradient(p.x, p.y, p.x + p.w, p.y);
+  shineGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
+  shineGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = shineGrad;
+  ctx.fill();
+
+  // Border
+  ctx.strokeStyle = LIGHT;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Face — eyes
+  var eyeY = p.y + p.h * 0.35;
+  ctx.fillStyle = WHITE;
+  ctx.beginPath();
+  ctx.arc(p.x + p.w * 0.35, eyeY, 5, 0, Math.PI * 2);
+  ctx.arc(p.x + p.w * 0.65, eyeY, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Pupils (look forward)
+  ctx.fillStyle = DARK;
+  ctx.beginPath();
+  ctx.arc(p.x + p.w * 0.38, eyeY, 2.5, 0, Math.PI * 2);
+  ctx.arc(p.x + p.w * 0.68, eyeY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Mouth
+  if (!p.onGround) {
+    // Open mouth when jumping
+    ctx.fillStyle = WHITE;
+    ctx.beginPath();
+    ctx.arc(p.x + p.w / 2, p.y + p.h * 0.6, 5, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // Smile
+    ctx.strokeStyle = WHITE;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x + p.w / 2, p.y + p.h * 0.55, 7, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+  }
+
+  // Legs (running animation)
+  var legCycle = Math.sin(frameCount * 0.3) * 6;
+  ctx.strokeStyle = LIGHT;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+
+  // Left leg
+  ctx.beginPath();
+  ctx.moveTo(p.x + p.w * 0.35, p.y + p.h);
+  ctx.lineTo(p.x + p.w * 0.35 + (p.onGround ? legCycle : -3), p.y + p.h + 10);
+  ctx.stroke();
+
+  // Right leg
+  ctx.beginPath();
+  ctx.moveTo(p.x + p.w * 0.65, p.y + p.h);
+  ctx.lineTo(p.x + p.w * 0.65 + (p.onGround ? -legCycle : 3), p.y + p.h + 10);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawObstacle(o) {
+  ctx.save();
+
+  if (o.type === 'barrier') {
+    // Wide barrier — hazard stripes
+    ctx.fillStyle = o.color;
+    var r = 4;
+    ctx.beginPath();
+    ctx.moveTo(o.x + r, o.y);
+    ctx.lineTo(o.x + o.w - r, o.y);
+    ctx.quadraticCurveTo(o.x + o.w, o.y, o.x + o.w, o.y + r);
+    ctx.lineTo(o.x + o.w, o.y + o.h);
+    ctx.lineTo(o.x, o.y + o.h);
+    ctx.lineTo(o.x, o.y + r);
+    ctx.quadraticCurveTo(o.x, o.y, o.x + r, o.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Stripes
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    for (var sx = o.x; sx < o.x + o.w; sx += 12) {
+      ctx.beginPath();
+      ctx.moveTo(sx, o.y);
+      ctx.lineTo(sx + 8, o.y + o.h);
+      ctx.stroke();
+    }
+  } else {
+    // Billboard sign/tall obstacle
+    // Pole
+    ctx.fillStyle = '#555';
+    var poleW = 6;
+    ctx.fillRect(o.x + o.w / 2 - poleW / 2, o.y + 20, poleW, o.h - 20);
+
+    // Sign board
+    var signH = Math.min(25, o.h - 5);
+    ctx.fillStyle = o.color;
+    var r = 4;
+    ctx.beginPath();
+    ctx.moveTo(o.x + r, o.y);
+    ctx.lineTo(o.x + o.w - r, o.y);
+    ctx.quadraticCurveTo(o.x + o.w, o.y, o.x + o.w, o.y + r);
+    ctx.lineTo(o.x + o.w, o.y + signH);
+    ctx.lineTo(o.x, o.y + signH);
+    ctx.lineTo(o.x, o.y + r);
+    ctx.quadraticCurveTo(o.x, o.y, o.x + r, o.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // X mark
+    ctx.fillStyle = WHITE;
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('X', o.x + o.w / 2, o.y + signH / 2);
+  }
+
+  ctx.restore();
+}
+
+function drawParticles() {
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.15;
+    p.life--;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.life / 30;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawHUD() {
+  // Score
+  ctx.fillStyle = WHITE;
+  ctx.font = 'bold 24px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(Math.floor(score), canvas.width - 20, 40);
+
+  // High score
+  if (highScore > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '14px Arial';
+    ctx.fillText('HI ' + highScore, canvas.width - 20, 60);
+  }
+
+  // Speed indicator
+  ctx.fillStyle = LIGHT;
+  ctx.font = '12px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText('SPEED ' + speed.toFixed(1), 20, 40);
+}
+
+// ─── COLLISION ────────────────────────────────────
+function checkCollision(a, b) {
+  var padding = 6; // small forgiveness
+  return a.x + padding < b.x + b.w &&
+         a.x + a.w - padding > b.x &&
+         a.y + padding < b.y + b.h &&
+         a.y + a.h - padding > b.y;
+}
+
+// ─── DEATH EFFECT ─────────────────────────────────
+function deathEffect() {
+  for (var i = 0; i < 20; i++) {
+    particles.push({
+      x: player.x + player.w / 2,
+      y: player.y + player.h / 2,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 30 + Math.random() * 20,
+      size: 2 + Math.random() * 4,
+      color: i % 2 === 0 ? BLUE : LIGHT
+    });
+  }
+  if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+}
+
+// ─── GAME LOOP ────────────────────────────────────
+function gameLoop() {
+  if (!running) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawSky();
+  drawClouds();
+
+  if (!gameOver) {
+    frameCount++;
+    score += speed * 0.02;
+    speed = Math.min(MAX_SPEED, BASE_SPEED + frameCount * SPEED_RAMP);
+
+    // Player physics
+    player.vy += GRAVITY;
+    player.y += player.vy;
+    if (player.y >= groundY() - player.h) {
+      player.y = groundY() - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    // Spawn obstacles
+    var allPassed = true;
+    for (var i = 0; i < obstacles.length; i++) {
+      if (obstacles[i].x + obstacles[i].w > canvas.width * 0.5) {
+        allPassed = false;
+        break;
+      }
+    }
+    var spawnGap = Math.max(180, minSpawnDist - frameCount * 0.1);
+    var rightmost = 0;
+    for (var i = 0; i < obstacles.length; i++) {
+      if (obstacles[i].x + obstacles[i].w > rightmost) {
+        rightmost = obstacles[i].x + obstacles[i].w;
+      }
+    }
+    if (rightmost < canvas.width - spawnGap) {
+      spawnObstacle();
+    }
+
+    // Update obstacles
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i];
+      o.x -= speed;
+
+      // Score point for passing
+      if (!o.passed && o.x + o.w < player.x) {
+        o.passed = true;
+      }
+
+      // Remove off-screen
+      if (o.x + o.w < -20) {
+        obstacles.splice(i, 1);
+        continue;
+      }
+
+      // Collision
+      if (checkCollision(player, o)) {
+        gameOver = true;
+        deathEffect();
+
+        // Update high score
+        var finalScore = Math.floor(score);
+        if (finalScore > highScore) {
+          highScore = finalScore;
+          localStorage.setItem('bb_runner_high', highScore.toString());
+        }
+
+        // Show end screen after short delay
+        setTimeout(function() {
+          finalScoreEl.textContent = finalScore;
+          highScoreEl.textContent = 'BEST: ' + highScore;
+          endScreen.classList.remove('hidden');
+        }, 800);
+      }
+    }
+
+    // Running particles
+    if (player.onGround && frameCount % 4 === 0) {
+      particles.push({
+        x: player.x,
+        y: groundY(),
+        vx: -Math.random() * 2 - 1,
+        vy: -Math.random() * 1.5,
+        life: 15 + Math.random() * 10,
+        size: 1.5 + Math.random() * 2,
+        color: 'rgba(42,163,242,0.5)'
+      });
+    }
+  }
+
+  drawGround();
+
+  // Draw obstacles
+  for (var i = 0; i < obstacles.length; i++) {
+    drawObstacle(obstacles[i]);
+  }
+
+  drawPlayer();
+  drawParticles();
+  if (!gameOver) drawHUD();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── START / RESTART ──────────────────────────────
+function startGame() {
+  resetGame();
+  gameOver = false;
+  running = true;
+  startScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  requestAnimationFrame(gameLoop);
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+</script>
+
+</body>
+</html>
