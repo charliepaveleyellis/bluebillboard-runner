@@ -15,10 +15,27 @@
     user-select: none;
   }
 
+  #camera {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+  }
+  #camera.hidden { display: none; }
+
+  .fallback-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 0;
+    background: linear-gradient(135deg, #001a33 0%, #003d7a 50%, #001a33 100%);
+  }
+  .fallback-bg.hidden { display: none; }
+
   canvas {
+    position: fixed; top: 0; left: 0;
     display: block;
     width: 100vw;
     height: 100vh;
+    z-index: 1;
   }
 
   /* Overlays */
@@ -84,6 +101,8 @@
 </head>
 <body>
 
+<video id="camera" autoplay playsinline muted></video>
+<div class="fallback-bg hidden" id="fallbackBg"></div>
 <canvas id="game"></canvas>
 
 <!-- Start screen -->
@@ -107,6 +126,26 @@
 <div class="powered-by">Powered by Blue Billboard</div>
 
 <script>
+// ─── CAMERA SETUP ─────────────────────────────────
+var cameraEl = document.getElementById('camera');
+var fallbackBg = document.getElementById('fallbackBg');
+var cameraActive = false;
+
+async function initCamera() {
+  try {
+    var stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }, audio: false
+    });
+    cameraEl.srcObject = stream;
+    cameraActive = true;
+  } catch (e) {
+    cameraEl.classList.add('hidden');
+    fallbackBg.classList.remove('hidden');
+    cameraActive = false;
+  }
+}
+initCamera();
+
 // ─── CANVAS SETUP ─────────────────────────────────
 var canvas = document.getElementById('game');
 var ctx = canvas.getContext('2d');
@@ -314,23 +353,34 @@ function spawnObstacle() {
 // ─── DRAW FUNCTIONS ───────────────────────────────
 
 function drawSky() {
-  // Gradient sky
-  var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, '#000d1a');
-  grad.addColorStop(0.5, '#001a33');
-  grad.addColorStop(1, '#003d7a');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Clear canvas fully transparent first
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Stars
-  for (var i = 0; i < stars.length; i++) {
-    var s = stars[i];
-    s.twinkle += 0.03;
-    var alpha = 0.3 + Math.sin(s.twinkle) * 0.3;
-    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
-    ctx.beginPath();
-    ctx.arc(s.x % canvas.width, s.y, s.size, 0, Math.PI * 2);
-    ctx.fill();
+  if (cameraActive) {
+    // Semi-transparent overlay so camera shows through
+    ctx.fillStyle = 'rgba(0, 15, 40, 0.3)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    // Solid gradient fallback
+    var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#000d1a');
+    grad.addColorStop(0.5, '#001a33');
+    grad.addColorStop(1, '#003d7a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Stars (only if no camera)
+  if (!cameraActive) {
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      s.twinkle += 0.03;
+      var alpha = 0.3 + Math.sin(s.twinkle) * 0.3;
+      ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
+      ctx.beginPath();
+      ctx.arc(s.x % canvas.width, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -358,16 +408,23 @@ function drawClouds() {
 function drawGround() {
   var gy = groundY();
 
-  // Ground line
+  // Solid ground area so game elements are visible against camera
+  ctx.fillStyle = 'rgba(0, 26, 51, 0.85)';
+  ctx.fillRect(0, gy, canvas.width, canvas.height - gy);
+
+  // Ground line (glowing)
+  ctx.shadowColor = LIGHT;
+  ctx.shadowBlur = 8;
   ctx.strokeStyle = LIGHT;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, gy);
   ctx.lineTo(canvas.width, gy);
   ctx.stroke();
+  ctx.shadowBlur = 0;
 
   // Ground texture dashes
-  ctx.strokeStyle = 'rgba(42, 163, 242, 0.2)';
+  ctx.strokeStyle = 'rgba(42, 163, 242, 0.25)';
   ctx.lineWidth = 1;
   var dashOffset = (frameCount * speed) % 40;
   for (var x = -dashOffset; x < canvas.width; x += 40) {
@@ -566,6 +623,10 @@ function drawParticles() {
 }
 
 function drawHUD() {
+  // HUD background strip
+  ctx.fillStyle = 'rgba(0, 15, 40, 0.6)';
+  ctx.fillRect(0, 0, canvas.width, 70);
+
   // Score
   ctx.fillStyle = WHITE;
   ctx.font = 'bold 24px Arial';
@@ -576,7 +637,7 @@ function drawHUD() {
   if (highScore > 0) {
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '14px Arial';
-    ctx.fillText('HI ' + highScore, canvas.width - 20, 60);
+    ctx.fillText('HI ' + highScore, canvas.width - 20, 58);
   }
 
   // Speed indicator
