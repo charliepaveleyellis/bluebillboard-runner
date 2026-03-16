@@ -234,8 +234,8 @@ function handleInput(e) {
   jump();
 }
 
-document.addEventListener('touchstart', handleInput, { passive: false });
-document.addEventListener('mousedown', handleInput);
+canvas.addEventListener('touchstart', handleInput, { passive: false });
+canvas.addEventListener('mousedown', handleInput);
 document.addEventListener('keydown', function(e) {
   if (e.code === 'Space' || e.code === 'ArrowUp') {
     handleInput(e);
@@ -727,8 +727,10 @@ function startGame() {
   requestAnimationFrame(gameLoop);
 }
 
-document.getElementById('startBtn').addEventListener('click', startGame);
-document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('startBtn').addEventListener('click', function(e) { e.stopPropagation(); startGame(); });
+document.getElementById('startBtn').addEventListener('touchstart', function(e) { e.stopPropagation(); });
+document.getElementById('restartBtn').addEventListener('click', function(e) { e.stopPropagation(); startGame(); });
+document.getElementById('restartBtn').addEventListener('touchstart', function(e) { e.stopPropagation(); });
 </script>
 
 </body>
