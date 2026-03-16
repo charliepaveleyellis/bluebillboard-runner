@@ -743,9 +743,7 @@ function gameLoop() {
 
         // Show end screen after short delay
         setTimeout(function() {
-          finalScoreEl.textContent = finalScore;
-          highScoreEl.textContent = 'BEST: ' + highScore;
-          endScreen.classList.remove('hidden');
+          showEndScreen(finalScore);
         }, 800);
       }
     }
@@ -779,19 +777,29 @@ function gameLoop() {
 }
 
 // ─── START / RESTART ──────────────────────────────
+
+// Disable canvas interaction when overlays are visible
+canvas.style.pointerEvents = 'none';
+
 function startGame() {
   resetGame();
   gameOver = false;
   running = true;
   startScreen.classList.add('hidden');
   endScreen.classList.add('hidden');
+  canvas.style.pointerEvents = 'auto';
   requestAnimationFrame(gameLoop);
 }
 
-document.getElementById('startBtn').addEventListener('click', function(e) { e.stopPropagation(); startGame(); });
-document.getElementById('startBtn').addEventListener('touchstart', function(e) { e.stopPropagation(); });
-document.getElementById('restartBtn').addEventListener('click', function(e) { e.stopPropagation(); startGame(); });
-document.getElementById('restartBtn').addEventListener('touchstart', function(e) { e.stopPropagation(); });
+function showEndScreen(finalScore) {
+  canvas.style.pointerEvents = 'none';
+  finalScoreEl.textContent = finalScore;
+  highScoreEl.textContent = 'BEST: ' + highScore;
+  endScreen.classList.remove('hidden');
+}
+
+document.getElementById('startBtn').addEventListener('click', function(e) { e.preventDefault(); startGame(); });
+document.getElementById('restartBtn').addEventListener('click', function(e) { e.preventDefault(); startGame(); });
 </script>
 
 </body>
